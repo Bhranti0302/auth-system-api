@@ -52,17 +52,17 @@ const userSchemma = new mongoose.Schema(
 );
 
 // 🔐 HASH PASSWORD BEFORE SAVE
-userSchema.pre("save",async function(next){
-    if(!this.isModified("password")) return next();
+userSchema.pre("save", async function (next) {
+  if (!this.isModified("password")) return next();
 
-    const salt=await bcrypt.genSalt(10);
-    this.password=await bcrypt.hash(this.password,salt);
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
 
-    // Update passwordChangedAt when password is modified
-    this.passwordChangeAt=Date.now()-1000;
+  // Update passwordChangedAt
+  this.passwordChangedAt = Date.now() - 1000;
 
-    next();
-})
+  next();
+});
 
 // 🔑 COMPARE PASSWORD
 userSchema.methods.comparePassword=async function(enteredPassword){
@@ -79,4 +79,4 @@ userSchema.methods.createPasswordResetToken=function(){
     return resetToken;
 }
 
-module.exports=mongoose.model("User",userSchemma);
+module.exports=mongoose.model("User",userSchema);8
