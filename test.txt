@@ -1,0 +1,22 @@
+🚀 1. Auth System Playground (Foundation App)
+
+👉 Goal: Master ALL authentication types
+
+🔐 Features
+Signup / Login / Logout
+Session-based auth
+JWT auth
+OAuth (Google login)
+MFA (OTP via email)
+Basic auth (for API testing)
+💾 Storage
+Cookies (session ID)
+LocalStorage (JWT)
+HTTP-only cookies (secure JWT)
+🧠 What you learn
+Difference between Session vs JWT
+Security best practices (cookies vs localStorage)
+Token lifecycle
+💼 Resume Impact
+
+“Implemented multiple authentication strategies including JWT, session-based auth, OAuth, and MFA.”

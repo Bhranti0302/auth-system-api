@@ -2,6 +2,8 @@ const express = require("express");
 
 const app = express();
 
+const authRoutes = require("./routes/authRoutes");
+
 // Middleware
 
 // Body parser
@@ -14,6 +16,10 @@ app.get("/", (req, res) => {
     message: "API is running",
   });
 });
+
+
+// Use auth routes
+app.use("/api/auth", authRoutes);
 
 // Global error handler(basic)
 app.use((err, req, res, next) => {
