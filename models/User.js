@@ -1,7 +1,8 @@
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
 
-const userSchemma = new mongoose.Schema(
+const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
@@ -79,4 +80,4 @@ userSchema.methods.createPasswordResetToken=function(){
     return resetToken;
 }
 
-module.exports=mongoose.model("User",userSchema);8
+module.exports=mongoose.model("User",userSchema);
