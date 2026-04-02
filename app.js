@@ -1,4 +1,5 @@
 const express = require("express");
+const cookieParser=require("cookie-parser");
 
 const app = express();
 
@@ -8,6 +9,9 @@ const authRoutes = require("./routes/authRoutes");
 
 // Body parser
 app.use(express.json());
+
+// Cookie parser
+app.use(cookieParser());
 
 // Routes
 app.get("/", (req, res) => {
