@@ -4,6 +4,7 @@ const cookieParser=require("cookie-parser");
 const app = express();
 
 const authRoutes = require("./routes/authRoutes");
+const testRoutes=require("./routes/testRoutes");
 
 // Middleware
 
@@ -24,6 +25,7 @@ app.get("/", (req, res) => {
 
 // Use auth routes
 app.use("/api/auth", authRoutes);
+app.use("/api/test",testRoutes);
 
 // Global error handler(basic)
 app.use((err, req, res, next) => {
