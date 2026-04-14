@@ -34,6 +34,10 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
 
+    googleId:{
+        type:String,
+    },
+
     status:{
         type:String,
         enum:["active","inactive","blocked"],
