@@ -1,112 +1,106 @@
 const User = require("../models/User");
-const {OAuth2Client} = require("google-auth-library");
+const { OAuth2Client } = require("google-auth-library");
+const crypto = require("crypto");
+
 const generateToken = require("../utils/generateToken");
 const cookieOptions = require("../utils/cookieOptions");
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-exports.googleLogin = async (req,res)=>{
-  try{
-    const {token}=req.body;
+// ================= GOOGLE LOGIN (SESSION) =================
+exports.googleLogin = async (req, res) => {
+  try {
+    const { token } = req.body;
 
-    // 1. Verify token
-    const ticket=await client.verifyIdToken({
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Token is required",
+      });
+    }
+
+    const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
-    })
+    });
 
-    const payload=ticket.getPayload();
+    const payload = ticket.getPayload();
 
-    // 2. Check if user exists
-    let user = await User.findOne({
-      email: payload.email,
-    })
+    if (!payload.email_verified) {
+      return res.status(400).json({
+        success: false,
+        message: "Email not verified",
+      });
+    }
 
-    // 3. Create user if not exists
-    if(!user){
+    let user = await User.findOne({ email: payload.email });
+
+    if (!user) {
       user = await User.create({
         name: payload.name,
         email: payload.email,
         googleId: payload.sub,
-        password: crypto.randomBytes(20).toString("hex"), 
-      })
+        password: crypto.randomBytes(20).toString("hex"),
+      });
     }
 
-    // 4. Generate token
-    const jwtToken=generateToken(user._id);
+    // ✅ SESSION LOGIN
+    req.session.user = {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      status: user.status,
+    };
 
-    // 5. Send response (cookie only)
-    res
-      .cookie("token", jwtToken, cookieOptions)
-      .status(200)
-      .json({
+    // ✅ Ensure session is saved
+    req.session.save(() => {
+      res.status(200).json({
         success: true,
-        message: "User logged in successfully",
+        message: "Google login successful (session)",
       });
-
-  } catch(err){
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: err.message,
-    })
-  }
-}
-
-// ================= SIGNUP =================
-exports.signup = async (req, res) => {
-  try {
-    const { name, email, password } = req.body;
-
-    // 1. Check existing user
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "User already exists with this email",
-      });
-    }
-
-    // 2. Create user
-    const user = await User.create({
-      name,
-      email,
-      password,
     });
-
-    // 3. Generate token
-    const token = generateToken(user._id);
-
-    // 4. Send response (cookie only)
-    res
-      .cookie("token", token, cookieOptions)
-      .status(201)
-      .json({
-        success: true,
-        message: "User registered successfully",
-        data: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          status: user.status,
-        },
-      });
   } catch (err) {
     res.status(500).json({
       success: false,
-      message: "Server error",
+      message: "Google login failed",
       error: err.message,
     });
   }
 };
 
-// ================= LOGIN =================
+// ================= SIGNUP (JWT COOKIE) =================
+exports.signup = async (req, res) => {
+  try {
+    const { name, email, password } = req.body;
+
+    const existingUser = await User.findOne({ email });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: "User already exists",
+      });
+    }
+
+    const user = await User.create({ name, email, password });
+
+    const token = generateToken(user._id);
+
+    res.cookie("token", token, cookieOptions).status(201).json({
+      success: true,
+      message: "Signup successful",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ================= LOGIN (JWT COOKIE) =================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // 1. Check user exists
     const user = await User.findOne({ email }).select("+password");
 
     if (!user) {
@@ -116,15 +110,13 @@ exports.login = async (req, res) => {
       });
     }
 
-    // 2. Check account status
     if (user.status !== "active") {
       return res.status(403).json({
         success: false,
-        message: "Account is not active",
+        message: "Account not active",
       });
     }
 
-    // 3. Compare password
     const isMatch = await user.comparePassword(password);
 
     if (!isMatch) {
@@ -134,33 +126,31 @@ exports.login = async (req, res) => {
       });
     }
 
-    // 4. Generate token
     const token = generateToken(user._id);
 
-    // 5. Send response (cookie only)
     res.cookie("token", token, cookieOptions).status(200).json({
       success: true,
-      message: "User logged in successfully",
+      message: "Login successful",
     });
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: "Server error",
-      error: err.message,
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
-// ================= LOGOUT =================
+// ================= LOGOUT (BOTH) =================
 exports.logout = (req, res) => {
-  res
-    .cookie("token", "", {
-      httpOnly: true,
-      expires: new Date(0),
-    })
-    .status(200)
-    .json({
-      success: true,
-      message: "User logged out successfully",
-    });
+  req.session.destroy(() => {
+    res
+      .cookie("token", "", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        expires: new Date(0),
+      })
+      .status(200)
+      .json({
+        success: true,
+        message: "Logged out successfully",
+      });
+  });
 };
