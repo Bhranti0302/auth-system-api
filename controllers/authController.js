@@ -12,6 +12,7 @@ exports.googleLogin = async (req, res) => {
   try {
     const { token } = req.body;
 
+    // 1. Check if token is provided
     if (!token) {
       return res.status(400).json({
         success: false,
@@ -19,13 +20,16 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
+    // 2. Verify token with Google
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
 
+    // 3. Get user info from token payload
     const payload = ticket.getPayload();
 
+    // 4. Check if email is verified
     if (!payload.email_verified) {
       return res.status(400).json({
         success: false,
@@ -33,8 +37,10 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
+    // 5. Find or create user in database
     let user = await User.findOne({ email: payload.email });
 
+    // 6. If user doesn't exist, create a new one
     if (!user) {
       user = await User.create({
         name: payload.name,
@@ -44,7 +50,7 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
-    // ✅ SESSION LOGIN
+    // 7. Store user info in session
     req.session.user = {
       id: user._id,
       email: user.email,
@@ -53,7 +59,7 @@ exports.googleLogin = async (req, res) => {
       status: user.status,
     };
 
-    // ✅ Ensure session is saved
+    // 8. Save session and respond
     req.session.save(() => {
       res.status(200).json({
         success: true,
