@@ -2,11 +2,53 @@ const User = require("../models/User");
 const { OAuth2Client } = require("google-auth-library");
 const crypto = require("crypto");
 
-const generateToken = require("../utils/generateToken");
+const {generateAccessToken, generateRefreshToken} = require("../utils/generateToken");
 const cookieOptions = require("../utils/cookieOptions");
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+// ================= REFRESH TOKEN ===================
+exports.refreshToken=async(req,res)=>{
+  // 1. Get refresh token
+  const token = req.cookies.refreshToken;
+
+  // 2. Check if token is provided
+  if(!token){
+    return res.status(401).json({
+      message: "Not refresh token"
+    })
+  }
+
+  try{
+    // 3. Verify token
+     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+
+     // 4. Get user from the token
+     const user = await User.findById(decoded.id).select("-password");
+
+     // 5. Check if user exists
+     if(!user || user.refreshToken !== token){
+       return res.status(401).json({
+         message: "Invalid refresh token"
+       })
+     }
+
+     // 6. Generate new access token
+     const newAccessToken = generateAccessToken(user._id);
+     
+     // 7. Send new access token
+     res
+     .cookie("accessToken", newAccessToken, cookieOptions)
+     .status(200)
+     .json({success: true, accessToken: newAccessToken});
+
+  } catch(err){
+    console.log(err);
+    res.status(500).json({
+      message: "Server error"
+    })
+  }
+}
 // ================= GOOGLE LOGIN (SESSION) =================
 exports.googleLogin = async (req, res) => {
   try {
@@ -91,12 +133,23 @@ exports.signup = async (req, res) => {
 
     const user = await User.create({ name, email, password });
 
-    const token = generateToken(user._id);
+    const accessToken = generateAccessToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
 
-    res.cookie("token", token, cookieOptions).status(201).json({
-      success: true,
-      message: "Signup successful",
-    });
+    // Save refresh token in DB
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    res
+      .cookie("accessToken", accessToken, cookieOptions)
+      .cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+      })
+      .status(201)
+      .json({
+        success: true,
+        message: "Signup successful",
+      });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -132,27 +185,44 @@ exports.login = async (req, res) => {
       });
     }
 
-    const token = generateToken(user._id);
+    const accessToken = generateAccessToken(user._id);
+    const refreshToken = generateRefreshToken(user._id);
 
-    res.cookie("token", token, cookieOptions).status(200).json({
-      success: true,
-      message: "Login successful",
-    });
+    // Save refresh token in DB
+    user.refreshToken = refreshToken;
+    await user.save();
+
+    res
+      .cookie("accessToken", accessToken, cookieOptions)
+      .cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+      })
+      .status(200)
+      .json({
+        success: true,
+        message: "Login successful",
+      });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // ================= LOGOUT (BOTH) =================
-exports.logout = (req, res) => {
+exports.logout = async (req, res) => {
+  const token = req.cookies.refreshToken;
+
+  if (token) {
+    const user = await User.findOne({ refreshToken: token });
+    if (user) {
+      user.refreshToken = null;
+      await user.save();
+    }
+  }
+
   req.session.destroy(() => {
     res
-      .cookie("token", "", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        expires: new Date(0),
-      })
+      .clearCookie("accessToken")
+      .clearCookie("refreshToken")
       .status(200)
       .json({
         success: true,
