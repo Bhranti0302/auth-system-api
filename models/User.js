@@ -38,6 +38,10 @@ const userSchema = new mongoose.Schema(
         type:String,
     },
 
+    emailVerifyToken:{
+        type:String,
+    },
+
     status:{
         type:String,
         enum:["active","inactive","blocked"],
