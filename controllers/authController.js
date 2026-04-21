@@ -1,60 +1,60 @@
 const User = require("../models/User");
 const { OAuth2Client } = require("google-auth-library");
 const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
+const sendEmail = require("../utils/sendEmail");
 
-const {generateAccessToken, generateRefreshToken} = require("../utils/generateToken");
+const {
+  generateAccessToken,
+  generateRefreshToken,
+} = require("../utils/generateToken");
+
 const cookieOptions = require("../utils/cookieOptions");
 
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // ================= REFRESH TOKEN ===================
-exports.refreshToken=async(req,res)=>{
-  // 1. Get refresh token
+exports.refreshToken = async (req, res) => {
   const token = req.cookies.refreshToken;
 
-  // 2. Check if token is provided
-  if(!token){
+  if (!token) {
     return res.status(401).json({
-      message: "Not refresh token"
-    })
+      success: false,
+      message: "No refresh token",
+    });
   }
 
-  try{
-    // 3. Verify token
-     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
 
-     // 4. Get user from the token
-     const user = await User.findById(decoded.id).select("-password");
+    const user = await User.findById(decoded.id).select("-password");
 
-     // 5. Check if user exists
-     if(!user || user.refreshToken !== token){
-       return res.status(401).json({
-         message: "Invalid refresh token"
-       })
-     }
+    if (!user || user.refreshToken !== token) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid refresh token",
+      });
+    }
 
-     // 6. Generate new access token
-     const newAccessToken = generateAccessToken(user._id);
-     
-     // 7. Send new access token
-     res
-     .cookie("accessToken", newAccessToken, cookieOptions)
-     .status(200)
-     .json({success: true, accessToken: newAccessToken});
+    const newAccessToken = generateAccessToken(user._id);
 
-  } catch(err){
-    console.log(err);
-    res.status(500).json({
-      message: "Server error"
-    })
+    res.cookie("accessToken", newAccessToken, cookieOptions).status(200).json({
+      success: true,
+      accessToken: newAccessToken,
+    });
+  } catch (err) {
+    return res.status(401).json({
+      success: false,
+      message: "Expired or invalid refresh token",
+    });
   }
-}
+};
+
 // ================= GOOGLE LOGIN (SESSION) =================
 exports.googleLogin = async (req, res) => {
   try {
     const { token } = req.body;
 
-    // 1. Check if token is provided
     if (!token) {
       return res.status(400).json({
         success: false,
@@ -62,16 +62,13 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
-    // 2. Verify token with Google
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
 
-    // 3. Get user info from token payload
     const payload = ticket.getPayload();
 
-    // 4. Check if email is verified
     if (!payload.email_verified) {
       return res.status(400).json({
         success: false,
@@ -79,20 +76,24 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
-    // 5. Find or create user in database
     let user = await User.findOne({ email: payload.email });
 
-    // 6. If user doesn't exist, create a new one
     if (!user) {
       user = await User.create({
         name: payload.name,
         email: payload.email,
         googleId: payload.sub,
         password: crypto.randomBytes(20).toString("hex"),
+        status: "active",
       });
     }
 
-    // 7. Store user info in session
+    // ✅ Ensure Google users are active
+    if (user.status !== "active") {
+      user.status = "active";
+      await user.save();
+    }
+
     req.session.user = {
       id: user._id,
       email: user.email,
@@ -101,7 +102,6 @@ exports.googleLogin = async (req, res) => {
       status: user.status,
     };
 
-    // 8. Save session and respond
     req.session.save(() => {
       res.status(200).json({
         success: true,
@@ -117,7 +117,7 @@ exports.googleLogin = async (req, res) => {
   }
 };
 
-// ================= SIGNUP (JWT COOKIE) =================
+// ================= SIGNUP (EMAIL VERIFY) =================
 exports.signup = async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -133,29 +133,31 @@ exports.signup = async (req, res) => {
 
     const user = await User.create({ name, email, password });
 
-    const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
+    // ✅ Email verification token
+    const emailToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1d",
+    });
 
-    // Save refresh token in DB
-    user.refreshToken = refreshToken;
+    user.emailVerifyToken = emailToken;
     await user.save();
 
-    res
-      .cookie("accessToken", accessToken, cookieOptions)
-      .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-      })
-      .status(201)
-      .json({
-        success: true,
-        message: "Signup successful",
-      });
+    const url = `http://localhost:5000/api/auth/verify-email?token=${emailToken}`;
+
+    await sendEmail(user.email, "Verify your email", url);
+
+    res.status(201).json({
+      success: true,
+      message: "Signup successful, please verify your email",
+    });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
-// ================= LOGIN (JWT COOKIE) =================
+// ================= LOGIN (JWT + REFRESH) =================
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -172,7 +174,7 @@ exports.login = async (req, res) => {
     if (user.status !== "active") {
       return res.status(403).json({
         success: false,
-        message: "Account not active",
+        message: "Please verify your email",
       });
     }
 
@@ -188,7 +190,6 @@ exports.login = async (req, res) => {
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
 
-    // Save refresh token in DB
     user.refreshToken = refreshToken;
     await user.save();
 
@@ -196,6 +197,8 @@ exports.login = async (req, res) => {
       .cookie("accessToken", accessToken, cookieOptions)
       .cookie("refreshToken", refreshToken, {
         httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
       })
       .status(200)
       .json({
@@ -203,11 +206,14 @@ exports.login = async (req, res) => {
         message: "Login successful",
       });
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    res.status(500).json({
+      success: false,
+      message: err.message,
+    });
   }
 };
 
-// ================= LOGOUT (BOTH) =================
+// ================= LOGOUT =================
 exports.logout = async (req, res) => {
   const token = req.cookies.refreshToken;
 
@@ -229,4 +235,44 @@ exports.logout = async (req, res) => {
         message: "Logged out successfully",
       });
   });
+};
+
+// ================= VERIFY EMAIL =================
+exports.verifyEmail = async (req, res) => {
+  try {
+    const token = req.query.token;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: "Token is required",
+      });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    const user = await User.findById(decoded.id);
+
+    if (!user || user.emailVerifyToken !== token) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired token",
+      });
+    }
+
+    user.status = "active";
+    user.emailVerifyToken = null;
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Email verified successfully",
+    });
+  } catch (err) {
+    res.status(400).json({
+      success: false,
+      message: "Token expired or invalid",
+    });
+  }
 };
