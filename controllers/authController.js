@@ -62,6 +62,7 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
+    // ✅ Verify Google token
     const ticket = await client.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
@@ -76,36 +77,49 @@ exports.googleLogin = async (req, res) => {
       });
     }
 
+    // ✅ Check if user exists
     let user = await User.findOne({ email: payload.email });
 
+    // ✅ Create new user if not exists
     if (!user) {
       user = await User.create({
         name: payload.name,
         email: payload.email,
         googleId: payload.sub,
-        password: crypto.randomBytes(20).toString("hex"),
+        password: crypto.randomBytes(8).toString("hex") + "A@1", // regex-safe
+        isGoogleUser: true,
         status: "active",
       });
     }
 
-    // ✅ Ensure Google users are active
+    // ✅ If user exists but not Google user → link account
+    if (!user.isGoogleUser) {
+      user.googleId = payload.sub;
+      user.isGoogleUser = true;
+      user.status = "active";
+      await user.save();
+    }
+
+    // ✅ Ensure active status
     if (user.status !== "active") {
       user.status = "active";
       await user.save();
     }
 
+    // ✅ Create session
     req.session.user = {
       id: user._id,
       email: user.email,
       name: user.name,
       role: user.role,
       status: user.status,
+      isGoogleUser: user.isGoogleUser,
     };
 
     req.session.save(() => {
       res.status(200).json({
         success: true,
-        message: "Google login successful (session)",
+        message: "Google login successful",
       });
     });
   } catch (err) {
@@ -122,6 +136,19 @@ exports.signup = async (req, res) => {
   try {
     const { name, email, password } = req.body;
 
+    // ✅ PASSWORD VALIDATION (ADD THIS)
+    const passwordRegex =
+      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+
+    if (!passwordRegex.test(password)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Password must contain uppercase, lowercase, number and special character",
+      });
+    }
+
+    // ✅ CHECK EXISTING USER
     const existingUser = await User.findOne({ email });
 
     if (existingUser) {
@@ -131,9 +158,10 @@ exports.signup = async (req, res) => {
       });
     }
 
+    // ✅ CREATE USER
     const user = await User.create({ name, email, password });
 
-    // ✅ Email verification token
+    // ✅ EMAIL VERIFICATION TOKEN
     const emailToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "1d",
     });
