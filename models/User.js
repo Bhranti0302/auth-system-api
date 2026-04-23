@@ -24,8 +24,18 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, "Please provide a password"],
-      minlength: 6,
-      select: false, // 🔥 don't show password in queries
+      minlength: 8,
+      select: false,
+      validate: {
+        validator: function (value) {
+          // Strong password regex
+          return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/.test(
+            value,
+          );
+        },
+        message:
+          "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character",
+      },
     },
 
     role: {
@@ -34,20 +44,20 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
 
-    googleId:{
-        type:String,
+    googleId: {
+      type: String,
     },
 
-    emailVerifyToken:{
-        type:String,
+    emailVerifyToken: {
+      type: String,
     },
 
-    status:{
-        type:String,
-        enum:["active","inactive","blocked"],
-        default:"active"
+    status: {
+      type: String,
+      enum: ["active", "inactive", "blocked"],
+      default: "active",
     },
-    
+
     // Password reset fields
     passwordResetToken: String,
     passwordResetExpires: Date,
