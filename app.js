@@ -1,17 +1,29 @@
 const express = require("express");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
+const helmet = require("helmet");
 
 const app = express();
 
+const { apiLimiter } = require("./middlewares/rateLimiter");
+
 const authRoutes = require("./routes/authRoutes");
 const testRoutes = require("./routes/testRoutes");
+
+// 🔥 Trust proxy (IMPORTANT)
+app.set("trust proxy", 1);
+
+// 🔐 Security headers
+app.use(helmet());
 
 // Body parser
 app.use(express.json());
 
 // Cookie parser
 app.use(cookieParser());
+
+// Rate limiter (only API)
+app.use("/api", apiLimiter);
 
 // Session middleware
 app.use(
@@ -23,7 +35,7 @@ app.use(
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      maxAge: 24 * 60 * 60 * 1000,
     },
   }),
 );
@@ -36,7 +48,7 @@ app.get("/", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/test", testRoutes);
 
-// Error handler
+// Error handler (LAST)
 app.use((err, req, res, next) => {
   res.status(err.statusCode || 500).json({
     success: false,
