@@ -18,47 +18,42 @@ exports.refreshToken = async (req, res) => {
   const token = req.cookies.refreshToken;
 
   if (!token) {
-    return res.status(401).json({
-      success: false,
-      message: "No refresh token",
-    });
+    return res
+      .status(401)
+      .json({ success: false, message: "No refresh token" });
   }
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
 
-    const user = await User.findById(decoded.id).select("-password");
+    const user = await User.findById(decoded.id);
 
-    if (!user || user.refreshToken !== token) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid refresh token",
-      });
+    if (
+      !user ||
+      user.refreshToken !== token ||
+      decoded.tokenVersion !== user.tokenVersion
+    ) {
+      return res
+        .status(401)
+        .json({ success: false, message: "Invalid refresh token" });
     }
 
-    // ✅ ROTATION
+    // 🔄 ROTATION
     const newAccessToken = generateAccessToken(user._id);
-    const newRefreshToken = generateRefreshToken(user._id);
+    const newRefreshToken = generateRefreshToken(user._id, user.tokenVersion);
 
     user.refreshToken = newRefreshToken;
     await user.save();
 
     res
       .cookie("accessToken", newAccessToken, cookieOptions)
-      .cookie("refreshToken", newRefreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-      })
+      .cookie("refreshToken", newRefreshToken, cookieOptions)
       .status(200)
-      .json({
-        success: true,
-      });
-  } catch (err) {
-    return res.status(401).json({
-      success: false,
-      message: "Expired or invalid refresh token",
-    });
+      .json({ success: true });
+  } catch {
+    return res
+      .status(401)
+      .json({ success: false, message: "Expired or invalid refresh token" });
   }
 };
 
@@ -66,13 +61,6 @@ exports.refreshToken = async (req, res) => {
 exports.googleLogin = async (req, res) => {
   try {
     const { token } = req.body;
-
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        message: "Token is required",
-      });
-    }
 
     const ticket = await client.verifyIdToken({
       idToken: token,
@@ -82,10 +70,9 @@ exports.googleLogin = async (req, res) => {
     const payload = ticket.getPayload();
 
     if (!payload.email_verified) {
-      return res.status(400).json({
-        success: false,
-        message: "Email not verified",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Email not verified" });
     }
 
     let user = await User.findOne({ email: payload.email });
@@ -108,25 +95,17 @@ exports.googleLogin = async (req, res) => {
       await user.save();
     }
 
-    // ✅ JWT TOKENS (FIXED)
     const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
+    const refreshToken = generateRefreshToken(user._id, user.tokenVersion);
 
     user.refreshToken = refreshToken;
     await user.save();
 
     res
       .cookie("accessToken", accessToken, cookieOptions)
-      .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-      })
+      .cookie("refreshToken", refreshToken, cookieOptions)
       .status(200)
-      .json({
-        success: true,
-        message: "Google login successful",
-      });
+      .json({ success: true, message: "Google login successful" });
   } catch (err) {
     res.status(500).json({
       success: false,
@@ -154,25 +133,17 @@ exports.signup = async (req, res) => {
 
     const existingUser = await User.findOne({ email });
 
-    if (existingUser && existingUser.isGoogleUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Please login with Google",
-      });
-    }
-
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "User already exists",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "User already exists" });
     }
 
     const user = await User.create({
       name,
       email,
       password,
-      status: "inactive", // ✅ FIXED
+      status: "inactive",
     });
 
     const emailToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
@@ -191,10 +162,7 @@ exports.signup = async (req, res) => {
       message: "Signup successful, please verify your email",
     });
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -205,33 +173,26 @@ exports.login = async (req, res) => {
 
     const user = await User.findOne({ email }).select("+password");
 
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid credentials",
-      });
-    }
+    if (!user)
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid credentials" });
 
-    if (user.status !== "active") {
-      return res.status(403).json({
-        success: false,
-        message: "Please verify your email",
-      });
-    }
+    if (user.status !== "active")
+      return res
+        .status(403)
+        .json({ success: false, message: "Please verify your email" });
 
-    // ✅ Reset attempts if lock expired
+    // 🔐 Reset lock if expired
     if (user.lockUntil && user.lockUntil < Date.now()) {
       user.loginAttempts = 0;
       user.lockUntil = undefined;
-      await user.save();
     }
 
-    if (user.isLocked()) {
-      return res.status(403).json({
-        success: false,
-        message: "Account locked. Try again later",
-      });
-    }
+    if (user.isLocked())
+      return res
+        .status(403)
+        .json({ success: false, message: "Account locked" });
 
     const isMatch = await user.comparePassword(password);
 
@@ -244,10 +205,9 @@ exports.login = async (req, res) => {
 
       await user.save();
 
-      return res.status(400).json({
-        success: false,
-        message: "Invalid credentials",
-      });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid credentials" });
     }
 
     // ✅ Reset attempts
@@ -255,28 +215,18 @@ exports.login = async (req, res) => {
     user.lockUntil = undefined;
 
     const accessToken = generateAccessToken(user._id);
-    const refreshToken = generateRefreshToken(user._id);
+    const refreshToken = generateRefreshToken(user._id, user.tokenVersion);
 
     user.refreshToken = refreshToken;
     await user.save();
 
     res
       .cookie("accessToken", accessToken, cookieOptions)
-      .cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-      })
+      .cookie("refreshToken", refreshToken, cookieOptions)
       .status(200)
-      .json({
-        success: true,
-        message: "Login successful",
-      });
+      .json({ success: true, message: "Login successful" });
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
 
@@ -288,6 +238,7 @@ exports.logout = async (req, res) => {
     const user = await User.findOne({ refreshToken: token });
     if (user) {
       user.refreshToken = null;
+      user.tokenVersion += 1; // 🔥 logout all devices
       await user.save();
     }
   }
@@ -295,16 +246,9 @@ exports.logout = async (req, res) => {
   req.session?.destroy(() => {
     res
       .clearCookie("accessToken", cookieOptions)
-      .clearCookie("refreshToken", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-      })
+      .clearCookie("refreshToken", cookieOptions)
       .status(200)
-      .json({
-        success: true,
-        message: "Logged out successfully",
-      });
+      .json({ success: true, message: "Logged out successfully" });
   });
 };
 
@@ -318,10 +262,7 @@ exports.verifyEmail = async (req, res) => {
     const user = await User.findById(decoded.id);
 
     if (!user || user.emailVerifyToken !== token) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired token",
-      });
+      return res.status(400).json({ success: false, message: "Invalid token" });
     }
 
     user.status = "active";
@@ -329,57 +270,38 @@ exports.verifyEmail = async (req, res) => {
 
     await user.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Email verified successfully",
-    });
+    res.json({ success: true, message: "Email verified" });
   } catch {
-    res.status(400).json({
-      success: false,
-      message: "Token expired or invalid",
-    });
+    res.status(400).json({ success: false, message: "Token expired" });
   }
 };
 
 // ================= FORGOT PASSWORD =================
 exports.forgotPassword = async (req, res) => {
   try {
-    const { email } = req.body;
-
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: req.body.email });
 
     if (!user)
       return res
         .status(404)
         .json({ success: false, message: "User not found" });
 
-    if (user.isGoogleUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Use Google login",
-      });
-    }
-
     const resetToken = crypto.randomBytes(32).toString("hex");
 
-    const hashedToken = crypto
+    user.passwordResetToken = crypto
       .createHash("sha256")
       .update(resetToken)
       .digest("hex");
 
-    user.passwordResetToken = hashedToken;
     user.passwordResetExpires = Date.now() + 15 * 60 * 1000;
 
     await user.save();
 
-    const resetURL = `http://localhost:5000/api/auth/reset-password/${resetToken}`;
+    const url = `http://localhost:5000/api/auth/reset-password/${resetToken}`;
 
-    await sendEmail(user.email, "Reset Password", resetURL);
+    await sendEmail(user.email, "Reset Password", url);
 
-    res.status(200).json({
-      success: true,
-      message: "Reset link sent",
-    });
+    res.json({ success: true, message: "Reset link sent" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -388,34 +310,28 @@ exports.forgotPassword = async (req, res) => {
 // ================= RESET PASSWORD =================
 exports.resetPassword = async (req, res) => {
   try {
-    const { token } = req.params;
-    const { password } = req.body;
-
-    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+    const hashedToken = crypto
+      .createHash("sha256")
+      .update(req.params.token)
+      .digest("hex");
 
     const user = await User.findOne({
       passwordResetToken: hashedToken,
       passwordResetExpires: { $gt: Date.now() },
     });
 
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: "Token invalid or expired",
-      });
-    }
+    if (!user)
+      return res.status(400).json({ success: false, message: "Invalid token" });
 
-    user.password = password;
+    user.password = req.body.password;
     user.passwordResetToken = undefined;
     user.passwordResetExpires = undefined;
     user.refreshToken = null;
+    user.tokenVersion += 1;
 
     await user.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Password reset successful",
-    });
+    res.json({ success: true, message: "Password reset successful" });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -424,61 +340,23 @@ exports.resetPassword = async (req, res) => {
 // ================= CHANGE PASSWORD =================
 exports.changePassword = async (req, res) => {
   try {
-    const { currentPassword, newPassword } = req.body;
-
     const user = await User.findById(req.user.id).select("+password");
 
-    if (!user)
+    const isMatch = await user.comparePassword(req.body.currentPassword);
+
+    if (!isMatch)
       return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+        .status(400)
+        .json({ success: false, message: "Wrong password" });
 
-    if (user.isGoogleUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Google users cannot change password",
-      });
-    }
-
-    const isMatch = await user.comparePassword(currentPassword);
-
-    if (!isMatch) {
-      return res.status(400).json({
-        success: false,
-        message: "Current password is incorrect",
-      });
-    }
-
-    if (currentPassword === newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: "New password cannot be same as current password",
-      });
-    }
-
-    const passwordRegex =
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
-
-    if (!passwordRegex.test(newPassword)) {
-      return res.status(400).json({
-        success: false,
-        message: "Password must be strong",
-      });
-    }
-
-    user.password = newPassword;
+    user.password = req.body.newPassword;
     user.refreshToken = null;
+    user.tokenVersion += 1;
 
     await user.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Password changed successfully",
-    });
+    res.json({ success: true, message: "Password changed" });
   } catch (err) {
-    res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    res.status(500).json({ success: false, message: err.message });
   }
 };
