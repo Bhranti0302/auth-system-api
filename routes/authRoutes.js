@@ -8,8 +8,9 @@ const {
   googleLogin,
   refreshToken,
   verifyEmail,
-  forgotPassword, 
+  forgotPassword, // ✅ FIXED NAME
   resetPassword,
+  changePassword, // ✅ ADD THIS
 } = require("../controllers/authController");
 
 const { loginLimiter, signupLimiter } = require("../middlewares/rateLimiter");
@@ -29,5 +30,7 @@ router.get("/verify-email", verifyEmail);
 router.post("/forgot-password", forgotPassword); // ✅ FIXED
 router.post("/reset-password/:token", resetPassword);
 
+// ✅ Change password (protected)
+router.post("/change-password", protect, changePassword);
 
 module.exports = router;
