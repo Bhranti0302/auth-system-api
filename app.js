@@ -4,79 +4,109 @@ const session = require("express-session");
 const MongoStore = require("connect-mongo");
 const helmet = require("helmet");
 const csurf = require("csurf");
+const cors = require("cors");
+
+require("dotenv").config();
 
 const app = express();
 
+// 🔗 Passport (OAuth)
+require("./utils/passport");
+
+// 🔐 Rate limiter
 const { apiLimiter } = require("./middlewares/rateLimiter");
 
+// Routes
 const authRoutes = require("./routes/authRoutes");
 const testRoutes = require("./routes/testRoutes");
 
-// 🔥 Trust proxy (IMPORTANT for deployment)
+// 🔥 Trust proxy (for deployment)
 app.set("trust proxy", 1);
+
+// ================= MIDDLEWARE =================
 
 // 🔐 Security headers
 app.use(helmet());
 
-// Body parser
+// 🌐 CORS (IMPORTANT)
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+    credentials: true,
+  }),
+);
+
+// 📦 Body parser
 app.use(express.json());
 
-// Cookie parser
+// 🍪 Cookie parser
 app.use(cookieParser());
 
-// 🔐 Rate limiter (only API routes)
+// 🚦 Rate limiting
 app.use("/api", apiLimiter);
 
-// 🔐 Session middleware
+// 🔐 Session (required for OAuth only)
 app.use(
   session({
-    name: "sessionId", // cookie name
+    name: "sessionId",
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
 
-    // ✅ STORE SESSION IN MONGODB
     store: MongoStore.create({
       mongoUrl: process.env.MONGO_URI,
       collectionName: "sessions",
-      ttl: 14 * 24 * 60 * 60, // 14 days
+      ttl: 14 * 24 * 60 * 60,
     }),
 
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
-      maxAge: 14 * 24 * 60 * 60 * 1000, // 14 days
+      maxAge: 14 * 24 * 60 * 60 * 1000,
     },
   }),
 );
 
-// ================= CSRF SETUP =================
+// 🛂 Passport init (NO session needed)
+const passport = require("passport");
+app.use(passport.initialize());
 
-// Create CSRF middleware
+// ================= CSRF =================
+
+// CSRF config
 const csrfProtection = csurf({
-  cookie: true,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  },
 });
 
-// ✅ Route to get CSRF token
+// 🔑 Get CSRF token
 app.get("/api/csrf-token", csrfProtection, (req, res) => {
   res.json({ csrfToken: req.csrfToken() });
 });
 
-// ✅ Apply CSRF protection selectively
+// 🛡️ Apply CSRF selectively
 app.use("/api", (req, res, next) => {
   // Skip safe methods
   if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
     return next();
   }
 
-  // Skip public auth routes
+  // Skip auth routes
   if (
     req.path === "/auth/login" ||
     req.path === "/auth/signup" ||
     req.path === "/auth/google-login" ||
     req.path === "/auth/refresh-token" ||
-    req.path === "/auth/verify-email"
+    req.path === "/auth/verify-email" ||
+    req.path === "/auth/logout" ||
+    req.path === "/auth/forgot-password" ||
+    req.path.startsWith("/auth/reset-password") ||
+    req.path === "/auth/github" ||
+    req.path.startsWith("/auth/github/callback")
   ) {
     return next();
   }
@@ -96,7 +126,7 @@ app.use("/api/test", testRoutes);
 // ================= ERROR HANDLER =================
 
 app.use((err, req, res, next) => {
-  // 🔥 Handle CSRF errors
+  // CSRF error
   if (err.code === "EBADCSRFTOKEN") {
     return res.status(403).json({
       success: false,
@@ -106,7 +136,8 @@ app.use((err, req, res, next) => {
 
   res.status(err.statusCode || 500).json({
     success: false,
-    message: err.message || "Server Error",
+    message:
+      process.env.NODE_ENV === "production" ? "Server Error" : err.message,
   });
 });
 
