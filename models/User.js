@@ -6,23 +6,38 @@ const userSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
+      required: [true, "Please provide a name"],
       trim: true,
+      minlength: 2,
+      maxlength: 50,
     },
 
     email: {
       type: String,
-      required: true,
+      required: [true, "Please provide an email"],
       unique: true,
       lowercase: true,
       trim: true,
+      match: [/.+@.+\..+/, "Please provide a valid email address"],
+      index: true,
     },
 
     password: {
       type: String,
-      required: true,
       minlength: 8,
       select: false,
+      required: function () {
+        return !this.isGoogleUser; // ✅ important fix
+      },
+      validate: {
+        validator: function (value) {
+          return /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/.test(
+            value,
+          );
+        },
+        message:
+          "Password must be at least 8 characters long and include uppercase, lowercase, number, and special character",
+      },
     },
 
     role: {
@@ -34,15 +49,11 @@ const userSchema = new mongoose.Schema(
     googleId: String,
 
     isGoogleUser: {
-      // ✅ ADD THIS
       type: Boolean,
       default: false,
     },
 
-    refreshToken: {
-      // ✅ ADD THIS
-      type: String,
-    },
+    refreshToken: String,
 
     emailVerifyToken: String,
 
@@ -52,21 +63,32 @@ const userSchema = new mongoose.Schema(
       default: "active",
     },
 
+    // 🔐 Brute force protection
     loginAttempts: {
       type: Number,
       default: 0,
     },
     lockUntil: Date,
 
+    // 🔥 Logout all devices
+    tokenVersion: {
+      type: Number,
+      default: 0,
+    },
+
+    // 🔐 Password reset
     passwordResetToken: String,
     passwordResetExpires: Date,
 
+    // 🔐 Track password changes
     passwordChangedAt: Date,
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+  },
 );
 
-// HASH PASSWORD
+// 🔐 HASH PASSWORD BEFORE SAVE
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
 
@@ -77,13 +99,28 @@ userSchema.pre("save", async function (next) {
   next();
 });
 
-// COMPARE PASSWORD
-userSchema.methods.comparePassword = function (enteredPassword) {
-  return bcrypt.compare(enteredPassword, this.password);
+// 🔑 COMPARE PASSWORD
+userSchema.methods.comparePassword = async function (enteredPassword) {
+  return await bcrypt.compare(enteredPassword, this.password);
 };
 
+// 🔐 ACCOUNT LOCK CHECK
 userSchema.methods.isLocked = function () {
   return !!(this.lockUntil && this.lockUntil > Date.now());
+};
+
+// 🔐 GENERATE PASSWORD RESET TOKEN
+userSchema.methods.createPasswordResetToken = function () {
+  const resetToken = crypto.randomBytes(32).toString("hex");
+
+  this.passwordResetToken = crypto
+    .createHash("sha256")
+    .update(resetToken)
+    .digest("hex");
+
+  this.passwordResetExpires = Date.now() + 10 * 60 * 1000; // 10 min
+
+  return resetToken;
 };
 
 module.exports = mongoose.model("User", userSchema);
