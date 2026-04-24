@@ -8,9 +8,12 @@ const {
   googleLogin,
   refreshToken,
   verifyEmail,
+  forgotPassword, 
+  resetPassword,
 } = require("../controllers/authController");
 
 const { loginLimiter, signupLimiter } = require("../middlewares/rateLimiter");
+const { protect } = require("../middlewares/authMiddleware"); // ✅ REQUIRED
 
 // ✅ Apply rate limiting
 router.post("/signup", signupLimiter, signup);
@@ -21,5 +24,10 @@ router.post("/google-login", googleLogin);
 router.post("/refresh-token", refreshToken);
 
 router.get("/verify-email", verifyEmail);
+
+// ✅ Password reset
+router.post("/forgot-password", forgotPassword); // ✅ FIXED
+router.post("/reset-password/:token", resetPassword);
+
 
 module.exports = router;
