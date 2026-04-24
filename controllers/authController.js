@@ -306,66 +306,134 @@ exports.verifyEmail = async (req, res) => {
 };
 
 // ================= FORGET PASSWORD =================
-exports.forgetPassword = async (req, res) => {
+exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
 
     const user = await User.findOne({ email });
 
     if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      })
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
     }
 
-    // Prevent Google users
     if (user.isGoogleUser) {
       return res.status(400).json({
         success: false,
-        message: "Google users cannot reset password",
-      })
+        message: "Use Google login",
+      });
     }
 
-    const resetToken = crypto.randomBytes(32).toString("hex") + "A@1"; // regex-safe
+    // ✅ CORRECT TOKEN
+    const resetToken = crypto.randomBytes(32).toString("hex");
 
     const hashedToken = crypto
       .createHash("sha256")
       .update(resetToken)
       .digest("hex");
-    
-    // Match model field name
+
     user.passwordResetToken = hashedToken;
-    user.passwordResetExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
+    user.passwordResetExpires = Date.now() + 15 * 60 * 1000;
 
     await user.save();
 
-    const resetURL = `http://localhost:5000/api/auth/reset-password?token=${resetToken}`;
+    // ✅ FIXED URL
+    const resetURL = `http://localhost:5000/api/auth/reset-password/${resetToken}`;
 
-    await sendEmail(user.email, "Reset your password", resetURL);
+    await sendEmail(user.email, "Reset Password", resetURL);
 
     res.status(200).json({
       success: true,
-      message: "Reset link sent to email",
-    })
-  } catch (err) { 
-      res.status(500).json({
-        success: false,
-        message: err.message,
-      });
+      message: "Reset link sent",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
-}
+};
 
 // ================= RESET PASSWORD =================
-exports.resetpassword = async (req, res) => {
-  try { 
+exports.resetPassword = async (req, res) => {
+  try {
     const { token } = req.params;
     const { password } = req.body;
 
-    const passwordRegex =
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+    const user = await User.findOne({
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: Date.now() },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: "Token invalid or expired",
+      });
+    }
+
+    user.password = password;
+
+    user.passwordResetToken = undefined; // ✅ FIX
+    user.passwordResetExpires = undefined;
+
+    user.refreshToken = null;
+
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Password reset successful",
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+exports.changePassword = async (req, res) => { 
+  try {
+    const { currentPassword, newPassword } = req.body;
     
-    if (!passwordRegex.test(password)) {
+    // 1. Get logged-in user
+    const user = await User.findById(req.user.id).select("+password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // 2. Prevent Google users
+    if (user.isGoogleUser) {
+      return res.status(400).json({
+        success: false,
+        message: "Google users cannot change password",
+      })
+    }
+
+    // 3. Validate current password
+    const isMatch = await user.comparePassword(currentPassword);
+
+    if (!isMatch) { 
+      return res.status(400).json({
+        success: false,
+        message: "Current password is incorrect",
+      })
+    }
+
+    // 4. Prevent password reuse
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "New password cannot be the same as current password",
+      })
+    }
+
+    // 5. Validate new password
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
+
+    if (!passwordRegex.test(newPassword)) { 
       return res.status(400).json({
         success: false,
         message:
@@ -373,30 +441,18 @@ exports.resetpassword = async (req, res) => {
       })
     }
 
-    const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+    // 6. Update password
+    user.password = newPassword;
 
-    const user = await User.findOne({
-      passwordResetToken: hashedToken,
-      passwordResetExpires: { $gt: Date.now() },
-    })
-
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or expired token",
-      })
-    }
-
-    user.password = password;
-    user.passwordResetToken = null;
-    user.passwordResetExpires = null;
+    user.refreshToken = null; // Invalidate existing sessions
 
     await user.save();
 
     res.status(200).json({
       success: true,
-      message: "Password reset successfully",
-    });
+      message: "Password changed successfully",
+    })
+
   } catch (err) {
     res.status(500).json({
       success: false,
