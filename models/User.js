@@ -52,6 +52,12 @@ const userSchema = new mongoose.Schema(
       default: "active",
     },
 
+    loginAttempts: {
+      type: Number,
+      default: 0,
+    },
+    lockUntil: Date,
+
     passwordResetToken: String,
     passwordResetExpires: Date,
 
@@ -74,6 +80,10 @@ userSchema.pre("save", async function (next) {
 // COMPARE PASSWORD
 userSchema.methods.comparePassword = function (enteredPassword) {
   return bcrypt.compare(enteredPassword, this.password);
+};
+
+userSchema.methods.isLocked = function () {
+  return !!(this.lockUntil && this.lockUntil > Date.now());
 };
 
 module.exports = mongoose.model("User", userSchema);
