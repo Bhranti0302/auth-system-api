@@ -46,12 +46,12 @@ const userSchema = new mongoose.Schema(
       default: "user",
     },
 
-    googleId: String,
-
-    isGoogleUser: {
-      type: Boolean,
-      default: false,
+    provider: {
+      type: String,
+      enum: ["local", "google", "github", "facebook"],
+      default: "local",
     },
+    providerId: String,
 
     refreshToken: String,
 
