@@ -25,8 +25,6 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.3.1",
     "nodemailer": "^8.0.5",
-    "passport": "^0.7.0",
-    "passport-facebook": "^3.0.0",
-    "passport-github2": "^0.1.12"
+    "passport-facebook": "^3.0.0"
   }
 }
