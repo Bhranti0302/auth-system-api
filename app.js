@@ -6,6 +6,8 @@ const helmet = require("helmet");
 const csurf = require("csurf");
 const cors = require("cors");
 
+
+
 require("dotenv").config();
 
 const app = express();
@@ -19,6 +21,9 @@ const { apiLimiter } = require("./middlewares/rateLimiter");
 // Routes
 const authRoutes = require("./routes/authRoutes");
 const testRoutes = require("./routes/testRoutes");
+
+// Serve static files
+app.use(express.static(path.join(__dirname, "public")));
 
 // 🔥 Trust proxy (for deployment)
 app.set("trust proxy", 1);
