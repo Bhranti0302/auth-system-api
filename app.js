@@ -68,9 +68,6 @@ app.use(
   }),
 );
 
-// 🛂 Passport init (NO session needed)
-const passport = require("passport");
-app.use(passport.initialize());
 
 // ================= CSRF =================
 
