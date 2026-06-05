@@ -1,25 +1,28 @@
 const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
-const protect = (req, res, next) => {
+const protect = async (req, res, next) => {
   try {
-    // 1. Get token from cookies
     const token = req.cookies.token;
 
-    // 2. Check token exists
     if (!token) {
-      return res.status(401).json({ message: "Not authorized, no token" });
+      return res.status(401).json({ message: "Not authorized" });
     }
 
-    // 3. Verify token
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    // 4. Attach user id to request
-    req.user = decoded.id;
+    // ✅ get full user (except password)
+    const user = await User.findById(decoded.id).select("-password");
 
-    // 5. Move to next (controller)
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    req.user = user; // ✅ full user object
+
     next();
   } catch (error) {
-    return res.status(401).json({ message: "Not authorized, invalid token" });
+    res.status(401).json({ message: "Invalid token" });
   }
 };
 
